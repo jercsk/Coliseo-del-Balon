@@ -1,0 +1,501 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Coliseo del Balón - v6.7 TIEMPO REAL</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;700;900&display=swap" rel="stylesheet">
+    
+    <style>
+        body { font-family: 'Inter', sans-serif; background-color: #f1f5f9; }
+        .admin-only { display: none; } 
+        .is-admin .admin-only { display: block; }
+        .view-section { display: none; }
+        .view-active { display: block; }
+        #adminModal { display: none; }
+        #adminModal.active { display: flex; }
+        .loading-dots::after { content: '...'; animation: dots 1.5s infinite; }
+        @keyframes dots { 0%, 20% { content: '.'; } 40% { content: '..'; } 60%, 100% { content: '...'; } }
+    </style>
+</head>
+<body class="text-slate-800 pb-20">
+
+    <!-- Notificación Flotante -->
+    <div id="toast" class="fixed bottom-10 left-1/2 -translate-x-1/2 z-[200] bg-slate-900 text-emerald-400 px-6 py-3 rounded-2xl text-xs font-black uppercase tracking-widest shadow-2xl transition-all opacity-0 pointer-events-none border border-emerald-500 text-center w-[90%] max-w-md"></div>
+
+    <!-- Modal Admin -->
+    <div id="adminModal" class="fixed inset-0 z-[100] bg-slate-900/80 backdrop-blur-sm items-center justify-center p-4">
+        <div class="bg-white p-8 rounded-[2rem] w-full max-w-sm shadow-2xl space-y-6">
+            <div class="space-y-2 text-center">
+                <h3 class="text-xl font-black text-slate-900 uppercase tracking-tighter">Acceso de Control</h3>
+                <p class="text-[10px] font-bold text-slate-400 uppercase">Solo personal autorizado</p>
+            </div>
+            <input type="password" id="adminPass" class="w-full p-4 rounded-xl bg-slate-50 border-2 border-slate-100 outline-none focus:border-emerald-500 text-center font-bold tracking-widest" placeholder="••••••••">
+            <div class="flex gap-2">
+                <button onclick="window.closeAdminModal()" class="flex-1 py-3 text-xs font-black uppercase text-slate-400 hover:text-slate-600 transition-colors">Cancelar</button>
+                <button onclick="window.checkAdminPass()" class="flex-1 py-3 bg-slate-900 text-white rounded-xl text-xs font-black uppercase shadow-lg hover:bg-slate-800 transition-all">Entrar</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Navegación -->
+    <nav class="bg-slate-900 text-white p-5 sticky top-0 z-50 shadow-2xl">
+        <div class="max-w-7xl mx-auto flex justify-between items-center">
+            <div class="flex items-center gap-4 cursor-pointer" onclick="window.switchView('dashboard')">
+                <div class="bg-emerald-500 text-slate-900 font-black w-10 h-10 flex items-center justify-center rounded-xl text-xl shadow-lg">C</div>
+                <h1 class="font-black text-xl leading-none uppercase tracking-tighter">Coliseo del Balón</h1>
+            </div>
+            
+            <div class="flex gap-4 items-center">
+                <div class="flex bg-slate-800 p-1 rounded-xl border border-slate-700">
+                    <button onclick="window.switchView('dashboard')" id="btn-view-dash" class="px-4 py-1.5 rounded-lg text-[10px] font-black uppercase bg-emerald-500 text-slate-900 transition-colors">Ranking</button>
+                    <button onclick="window.switchView('jugador')" id="btn-view-jug" class="px-4 py-1.5 rounded-lg text-[10px] font-black uppercase text-slate-400 transition-colors">Jugar</button>
+                </div>
+                <button onclick="window.openAdminModal()" id="toggleAdmin" class="w-8 h-4 bg-slate-600 rounded-full relative transition-all">
+                    <div id="dotAdmin" class="w-3 h-3 bg-white rounded-full absolute top-0.5 left-0.5 transition-transform duration-300"></div>
+                </button>
+            </div>
+        </div>
+    </nav>
+
+    <!-- VISTA DASHBOARD -->
+    <main id="view-dashboard" class="view-section view-active max-w-7xl mx-auto p-4 md:p-8 space-y-10">
+        <!-- Contenedor de Partidos Dinámicos -->
+        <section id="setup-partidos" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4"></section>
+
+        <!-- PANEL DE CONTROL ADMIN -->
+        <section class="admin-only space-y-6 bg-white p-8 rounded-[2.5rem] border-2 border-slate-200 shadow-xl">
+            <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+                <div class="space-y-1">
+                    <h2 class="text-xl font-black text-slate-900 uppercase">Panel de Control</h2>
+                    <p class="text-[10px] font-bold text-slate-400 uppercase italic">Tip: Los cambios guardados se reflejan inmediatamente para todos los jugadores.</p>
+                </div>
+                <div class="flex gap-3">
+                    <button onclick="window.reiniciarCompetencia()" class="text-[10px] font-black text-red-500 bg-red-50 px-4 py-2 rounded-xl border border-red-200 uppercase hover:bg-red-500 hover:text-white transition-colors">⚠️ Reiniciar Todo</button>
+                    <button id="btnFinalizar" onclick="window.procesarJornada()" class="bg-emerald-500 text-slate-900 font-black px-6 py-2 rounded-xl text-[10px] uppercase shadow-lg hover:bg-emerald-400 transition-colors">Cerrar Jornada</button>
+                </div>
+            </div>
+            
+            <div class="bg-slate-50 rounded-2xl border border-slate-200 overflow-hidden">
+                <div class="overflow-x-auto">
+                    <table class="w-full text-sm">
+                        <thead class="bg-slate-100 text-[10px] font-black uppercase text-slate-500">
+                            <tr id="header-partidos"><th class="px-6 py-4 text-left">Participante</th></tr>
+                        </thead>
+                        <tbody id="registro-body" class="divide-y divide-slate-200 bg-white"></tbody>
+                    </table>
+                </div>
+            </div>
+            <button onclick="window.guardarConfiguracionManual()" id="btnSync" class="bg-slate-900 text-white px-6 py-5 rounded-2xl font-black text-sm uppercase w-full shadow-xl hover:bg-slate-800 transition-colors">Sincronizar y Guardar Cambios</button>
+        </section>
+
+        <!-- RANKING -->
+        <section class="grid grid-cols-1 lg:grid-cols-12 gap-8">
+            <div class="lg:col-span-8 bg-slate-900 rounded-[2.5rem] p-2 shadow-2xl min-h-[400px]">
+                <table class="w-full text-sm">
+                    <thead class="text-emerald-400 text-[10px] font-black uppercase tracking-widest border-b border-slate-800">
+                        <tr>
+                            <th class="p-6 text-left">Pos</th>
+                            <th class="p-6 text-left">Participante</th>
+                            <th class="p-6 text-center">Faltas</th>
+                            <th class="p-6 text-center">Aciertos</th>
+                            <th class="p-6 text-right">Puntos</th>
+                        </tr>
+                    </thead>
+                    <tbody id="ranking-body" class="text-slate-300 divide-y divide-slate-800/50"></tbody>
+                </table>
+            </div>
+            <div class="lg:col-span-4 bg-white p-8 rounded-[2.5rem] border border-slate-200 shadow-xl h-fit">
+                <h3 class="text-xs font-black uppercase text-slate-400 mb-6 tracking-widest text-center">Top 5 Rendimiento</h3>
+                <div class="h-64"><canvas id="rankingChart"></canvas></div>
+            </div>
+        </section>
+    </main>
+
+    <!-- VISTA JUGADOR -->
+    <main id="view-jugador" class="view-section max-w-xl mx-auto p-4 md:p-8">
+        <div class="bg-white rounded-[3rem] p-8 sm:p-12 shadow-2xl border border-slate-200 space-y-8">
+            <div class="text-center space-y-2">
+                <h2 class="text-4xl font-black text-slate-900 uppercase tracking-tighter">Tu Jugada</h2>
+                <div class="bg-emerald-50 border border-emerald-100 p-3 rounded-xl">
+                    <p class="text-[10px] text-emerald-700 font-bold uppercase leading-tight">
+                        ⚠️ Al ingresar tu nombre, este quedará registrado como tu identidad única para todo el Coliseo. 
+                    </p>
+                </div>
+            </div>
+            
+            <div class="space-y-4">
+                <input type="text" id="user-name" class="w-full p-5 rounded-2xl bg-slate-50 border-2 border-slate-100 font-bold text-slate-700 uppercase outline-none focus:border-emerald-500 transition-colors" placeholder="TU NOMBRE O EQUIPO">
+                <input type="password" id="user-pin" autocomplete="new-password" class="w-full p-5 rounded-2xl bg-slate-50 border-2 border-slate-100 font-bold text-slate-700 text-center tracking-widest outline-none focus:border-emerald-500 transition-colors text-xl" placeholder="PIN SECRETO (4 DÍGITOS)" maxlength="4">
+            </div>
+
+            <div id="formulario-partidos" class="space-y-3 pt-8 border-t border-slate-100"></div>
+
+            <button onclick="window.enviarJugada()" id="btnEnviarJugada" class="w-full bg-slate-900 text-white py-6 rounded-2xl font-black uppercase shadow-xl hover:bg-slate-800 transition-colors">
+                Registrar Pronósticos
+            </button>
+        </div>
+    </main>
+
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getFirestore, doc, setDoc, getDoc, onSnapshot, addDoc, collection } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+
+        // CONFIGURACIÓN FIREBASE
+        const firebaseConfig = {
+            apiKey: "AIzaSyA-nQDHns5K-ilJFe_YYCde28_aUlNoix4",
+            authDomain: "liga-coliseo-del-balon.firebaseapp.com",
+            projectId: "liga-coliseo-del-balon",
+            storageBucket: "liga-coliseo-del-balon.firebasestorage.app",
+            messagingSenderId: "218367721276",
+            appId: "1:218367721276:web:e709efe3c6025cffec6839",
+            measurementId: "G-FK76KLQT0D"
+        };
+
+        // ESTADO GLOBAL
+        window.database = [];
+        window.jornadaConfig = [
+            {local:'', visita:'', fecha: '', resultado:''},
+            {local:'', visita:'', fecha: '', resultado:''},
+            {local:'', visita:'', fecha: '', resultado:''},
+            {local:'', visita:'', fecha: '', resultado:''},
+            {local:'', visita:'', fecha: '', resultado:''}
+        ];
+        window.jornadaProcesada = false;
+        window.isAdmin = false;
+        window.tempPred = ['', '', '', '', ''];
+        window.chartInstance = null;
+
+        let db;
+        try {
+            const app = initializeApp(firebaseConfig);
+            db = getFirestore(app);
+            const auth = getAuth(app);
+            signInAnonymously(auth);
+            onAuthStateChanged(auth, (user) => { if (user) iniciarEscuchas(); });
+        } catch(e) { console.error(e); }
+
+        async function guardarDatosSeguro(referencia, datos) {
+            return setDoc(doc(db, "liga", referencia), datos);
+        }
+
+        // NUEVA FUNCIÓN: Comprobar si el partido ya pasó de fecha
+        window.isMatchLocked = function(fechaStr) {
+            if (!fechaStr || !fechaStr.includes('/')) return false; // Si no hay fecha o formato incorrecto, lo deja abierto.
+            const [dayStr, monthStr] = fechaStr.split('/');
+            const matchDay = parseInt(dayStr, 10);
+            const matchMonth = parseInt(monthStr, 10) - 1; // Meses en JS van de 0 a 11
+            if (isNaN(matchDay) || isNaN(matchMonth)) return false;
+
+            const now = new Date();
+            const today = new Date(now.getFullYear(), now.getMonth(), now.getDate()); // Hoy a las 00:00:00
+            const matchDate = new Date(now.getFullYear(), matchMonth, matchDay);
+
+            // Ajuste por si el torneo pasa de Diciembre a Enero
+            if (matchMonth === 11 && today.getMonth() === 0) matchDate.setFullYear(now.getFullYear() - 1);
+            if (matchMonth === 0 && today.getMonth() === 11) matchDate.setFullYear(now.getFullYear() + 1);
+
+            // Se bloquea si el día de hoy es igual o mayor al día del partido
+            return today.getTime() >= matchDate.getTime();
+        };
+
+        function iniciarEscuchas() {
+            onSnapshot(doc(db, "liga", "configuracion"), (docSnap) => {
+                if (docSnap.exists()) {
+                    window.jornadaConfig = docSnap.data().partidos || window.jornadaConfig;
+                    window.jornadaProcesada = docSnap.data().procesada || false;
+                    window.renderSetup();
+                }
+            });
+
+            onSnapshot(doc(db, "liga", "base_datos"), (docSnap) => {
+                if (docSnap.exists()) {
+                    window.database = docSnap.data().jugadores || [];
+                    window.renderRanking();
+                    window.renderTable();
+                    window.updateChart();
+                }
+            });
+        }
+
+        window.showToast = function(msg, isError = false) {
+            const t = document.getElementById('toast');
+            if(!t) return;
+            t.innerText = msg;
+            t.className = `fixed bottom-10 left-1/2 -translate-x-1/2 z-[200] px-6 py-3 rounded-2xl text-xs font-black uppercase tracking-widest shadow-2xl transition-all opacity-100 text-center w-[90%] max-w-md border ${isError ? 'bg-red-50 text-red-500 border-red-500' : 'bg-slate-900 text-emerald-400 border-emerald-500'}`;
+            setTimeout(() => t.style.opacity = "0", 4000);
+        };
+
+        window.openAdminModal = function() {
+            if (window.isAdmin) { 
+                window.isAdmin = false; 
+                window.updateAdminUI(); 
+                window.showToast("SESIÓN CERRADA");
+            } else { 
+                document.getElementById('adminModal').classList.add('active'); 
+                document.getElementById('adminPass').value = '';
+                document.getElementById('adminPass').focus(); 
+            }
+        };
+        
+        window.closeAdminModal = function() { 
+            document.getElementById('adminModal').classList.remove('active'); 
+            document.getElementById('adminPass').value = '';
+        };
+        
+        window.checkAdminPass = function() {
+            const pass = document.getElementById('adminPass').value;
+            if (pass === "jorgecsk257633") {
+                window.isAdmin = true; 
+                window.updateAdminUI(); 
+                window.closeAdminModal();
+                window.showToast("ACCESO AUTORIZADO");
+            } else { 
+                window.showToast("CLAVE INCORRECTA", true);
+                document.getElementById('adminPass').value = '';
+            }
+        };
+        
+        window.updateAdminUI = function() {
+            document.body.classList.toggle('is-admin', window.isAdmin);
+            document.getElementById('toggleAdmin').style.backgroundColor = window.isAdmin ? '#10b981' : '#475569';
+            document.getElementById('dotAdmin').style.transform = window.isAdmin ? 'translateX(16px)' : 'translateX(0)';
+            window.renderSetup(); 
+            window.renderTable();
+        };
+
+        window.guardarConfiguracionManual = async function() {
+            const btn = document.getElementById('btnSync');
+            btn.innerHTML = '<span class="loading-dots">GUARDANDO</span>';
+            btn.disabled = true;
+            try {
+                await guardarDatosSeguro("configuracion", { partidos: window.jornadaConfig, procesada: window.jornadaProcesada });
+                await guardarDatosSeguro("base_datos", { jugadores: window.database });
+                window.showToast("✅ CAMBIOS SINCRONIZADOS");
+            } catch (e) { window.showToast("ERROR AL GUARDAR", true); }
+            finally { btn.innerText = "Sincronizar y Guardar Cambios"; btn.disabled = false; }
+        };
+
+        window.enviarJugada = async function() {
+            const btn = document.getElementById('btnEnviarJugada');
+            const name = document.getElementById('user-name').value.trim().toUpperCase();
+            const pin = document.getElementById('user-pin').value.trim();
+
+            if(!name || !pin) return alert("Ingresa Nombre y PIN");
+            
+            // Verificación: Solo requiere respuesta para partidos ACTIVOS y NO BLOQUEADOS
+            for(let i=0; i < window.jornadaConfig.length; i++) {
+                const p = window.jornadaConfig[i];
+                const locked = window.isMatchLocked(p.fecha);
+                if(p.local.trim() !== "" && !locked && window.tempPred[i] === "") {
+                    return alert("Completa todos los partidos disponibles que aún están abiertos.");
+                }
+            }
+            
+            btn.disabled = true;
+            btn.innerHTML = '<span class="loading-dots">ENVIANDO</span>';
+            
+            try {
+                let uIdx = window.database.findIndex(u => u.nombre === name);
+                if (uIdx === -1) {
+                    window.database.push({ 
+                        nombre: name, puntos: 0, aciertos: 0, faltas: 0, 
+                        penalizadoHoy: false, predicciones: [...window.tempPred], 
+                        pin: pin, haDebutado: false 
+                    });
+                } else {
+                    if (window.database[uIdx].pin && window.database[uIdx].pin !== pin) throw new Error("PIN_INCORRECTO");
+                    
+                    const yaVoto = window.database[uIdx].predicciones.some(p => p !== '');
+                    if (yaVoto) throw new Error("YA_VOTO");
+
+                    window.database[uIdx].predicciones = [...window.tempPred];
+                }
+
+                await guardarDatosSeguro("base_datos", { jugadores: window.database });
+                localStorage.setItem('coliseo_user_last_name', name);
+                window.showToast("🎯 ¡PRONÓSTICOS GUARDADOS!");
+                setTimeout(() => window.switchView('dashboard'), 800);
+            } catch (e) { 
+                if (e.message === "PIN_INCORRECTO") {
+                    alert("❌ PIN Incorrecto. Verifica tus datos.");
+                } else if (e.message === "YA_VOTO") {
+                    alert("⚠️ Ya registraste tus pronósticos. No se permiten cambios hasta la próxima jornada.");
+                } else {
+                    alert("❌ Error de red."); 
+                }
+            }
+            finally { btn.disabled = false; btn.innerText = "Registrar Pronósticos"; }
+        };
+
+        window.procesarJornada = async function() {
+            const activos = window.jornadaConfig.filter(p => p.local.trim() !== "");
+            if(!activos.every(p => p.resultado)) return alert("Faltan resultados en partidos activos");
+            if(!confirm("¿Cerrar jornada y actualizar puntos?")) return;
+            
+            window.database.forEach(u => {
+                u.penalizadoHoy = false;
+                let jugoHoy = false;
+                window.jornadaConfig.forEach((p, i) => {
+                    if(p.local.trim() !== "") {
+                        if(u.predicciones[i] !== "") jugoHoy = true;
+                        if(u.predicciones[i] === p.resultado) { u.puntos += 3; u.aciertos++; }
+                    }
+                });
+                
+                if(!jugoHoy && u.haDebutado) { u.puntos -= 2; u.faltas++; u.penalizadoHoy = true; }
+                if(jugoHoy) u.haDebutado = true;
+                
+                u.predicciones = ['', '', '', '', ''];
+            });
+            window.jornadaProcesada = true;
+            await window.guardarConfiguracionManual();
+            location.reload(); 
+        };
+
+        window.reiniciarCompetencia = async function() {
+            if (!confirm("⚠️ Se borrarán todos los puntos y jugadores. ¿Confirmar?")) return;
+            window.database = [];
+            window.jornadaConfig = window.jornadaConfig.map(p => ({local:'', visita:'', fecha:'', resultado:''}));
+            await window.guardarConfiguracionManual();
+            window.showToast("COMPETENCIA REINICIADA");
+        };
+
+        window.switchView = function(view) {
+            document.querySelectorAll('.view-section').forEach(s => s.classList.remove('view-active'));
+            document.getElementById('view-' + view).classList.add('view-active');
+            if(view === 'jugador') window.renderFormJugador();
+            
+            document.getElementById('btn-view-dash').className = view === 'dashboard' ? "px-4 py-1.5 rounded-lg text-[10px] font-black uppercase bg-emerald-500 text-slate-900" : "px-4 py-1.5 rounded-lg text-[10px] font-black uppercase text-slate-400";
+            document.getElementById('btn-view-jug').className = view === 'jugador' ? "px-4 py-1.5 rounded-lg text-[10px] font-black uppercase bg-emerald-500 text-slate-900" : "px-4 py-1.5 rounded-lg text-[10px] font-black uppercase text-slate-400";
+        };
+
+        window.renderSetup = () => {
+            const container = document.getElementById('setup-partidos');
+            if(!container) return;
+            
+            const aMostrar = window.isAdmin ? window.jornadaConfig : window.jornadaConfig.filter(p => p.local.trim() !== "");
+
+            container.innerHTML = aMostrar.map((p, i) => {
+                const realIndex = window.jornadaConfig.indexOf(p);
+                const locked = !window.isAdmin && window.isMatchLocked(p.fecha);
+
+                return `
+                <div class="bg-white p-6 rounded-[2rem] border border-slate-200 shadow-sm relative overflow-hidden ${!window.isAdmin ? 'cursor-pointer hover:border-emerald-400 hover:shadow-lg transition-all group' : ''}" ${!window.isAdmin ? 'onclick="window.switchView(\'jugador\')"' : ''}>
+                    <div class="absolute top-0 right-0 bg-slate-100 px-3 py-1 rounded-bl-xl ${!window.isAdmin ? 'group-hover:bg-emerald-100 transition-colors' : ''}">
+                        ${window.isAdmin ? 
+                            `<input type="text" value="${p.fecha}" placeholder="DD/MM" onchange="window.jornadaConfig[${realIndex}].fecha=this.value" class="bg-transparent text-[9px] font-black w-10 outline-none text-slate-900 placeholder:text-slate-300">` : 
+                            `<span class="text-[9px] font-black ${locked ? 'text-red-500' : 'text-slate-900'}">${locked ? 'CERRADO' : (p.fecha || '--/--')}</span>`
+                        }
+                    </div>
+                    <p class="text-[9px] font-black text-slate-300 mb-4 uppercase tracking-widest">Partido ${realIndex+1}</p>
+                    <div class="space-y-2 mb-5">
+                        <input type="text" value="${p.local}" onchange="window.jornadaConfig[${realIndex}].local=this.value.toUpperCase(); window.renderSetup();" ${!window.isAdmin?'disabled':''} class="w-full text-[11px] font-black uppercase bg-transparent text-center outline-none ${!p.local.trim() && window.isAdmin ? 'border-b border-dashed border-slate-300' : 'text-slate-900'}" placeholder="EQUIPO LOCAL">
+                        <p class="text-[10px] text-center font-black text-slate-900">VS</p>
+                        <input type="text" value="${p.visita}" onchange="window.jornadaConfig[${realIndex}].visita=this.value.toUpperCase()" ${!window.isAdmin?'disabled':''} class="w-full text-[11px] font-black uppercase bg-transparent text-center outline-none ${!p.visita.trim() && window.isAdmin ? 'border-b border-dashed border-slate-300' : 'text-slate-900'}" placeholder="EQUIPO VISITA">
+                    </div>
+                    ${window.isAdmin ? 
+                        `<select onchange="window.jornadaConfig[${realIndex}].resultado=this.value" class="w-full text-[10px] font-black p-3 rounded-xl bg-slate-900 text-emerald-400 outline-none">
+                            <option value="">RESULTADO</option>
+                            <option value="1" ${p.resultado==='1'?'selected':''}>${p.local || 'LOCAL'}</option>
+                            <option value="X" ${p.resultado==='X'?'selected':''}>EMPATE</option>
+                            <option value="2" ${p.resultado==='2'?'selected':''}>${p.visita || 'VISITA'}</option>
+                        </select>` : 
+                        `<div class="text-[9px] font-black text-center py-3 bg-slate-50 rounded-xl uppercase tracking-widest ${p.resultado?'text-emerald-600':'text-slate-400'}">
+                            ${p.resultado === '1' ? (p.local || 'LOCAL') : p.resultado === 'X' ? 'EMPATE' : p.resultado === '2' ? (p.visita || 'VISITA') : 'En espera'}
+                        </div>`
+                    }
+                </div>`}).join('');
+            
+            const h = document.getElementById('header-partidos');
+            if(h) {
+                const colActivas = window.jornadaConfig.filter(p => p.local.trim() !== "");
+                h.innerHTML = '<th class="px-6 py-4 text-left">Participante</th>' + colActivas.map(p => `<th class="px-2 text-center text-[8px] opacity-40 uppercase">${(p.local || '???').substring(0,3)}</th>`).join('');
+            }
+        };
+
+        window.renderRanking = () => {
+            const tbody = document.getElementById('ranking-body');
+            if(!tbody) return;
+            const sorted = [...window.database].sort((a,b) => b.puntos - a.puntos || b.aciertos - a.aciertos);
+            tbody.innerHTML = sorted.map((u, i) => `
+                <tr class="border-b border-slate-800/30">
+                    <td class="p-6 font-black text-slate-600 text-xs">#${i+1}</td>
+                    <td class="p-6 font-bold text-white text-sm uppercase">${u.nombre} ${u.penalizadoHoy ? '⚠️' : ''}</td>
+                    <td class="p-6 text-center text-slate-500 font-bold">${u.faltas || 0}</td>
+                    <td class="p-6 text-center text-slate-500 font-bold">${u.aciertos}</td>
+                    <td class="p-6 text-right text-emerald-400 font-black text-2xl">${u.puntos}</td>
+                </tr>`).join('');
+        };
+
+        window.renderTable = () => {
+            const tbody = document.getElementById('registro-body');
+            if(!tbody) return;
+            const activas = window.jornadaConfig.map((p, i) => p.local.trim() !== "" ? i : -1).filter(idx => idx !== -1);
+            
+            tbody.innerHTML = window.database.map(u => {
+                const s = activas.map(idx => {
+                    const pr = u.predicciones[idx];
+                    return `<td class="px-1 py-3"><div class="text-[10px] font-black text-center w-8 h-8 flex items-center justify-center rounded-lg mx-auto ${pr?'bg-emerald-100 text-emerald-700':'bg-slate-100 text-slate-300'}">${pr || '-'}</div></td>`;
+                }).join('');
+                return `<tr><td class="px-6 py-4 font-bold text-xs uppercase">${u.nombre}</td>${s}</tr>`;
+            }).join('');
+        };
+
+        window.renderFormJugador = function() {
+            const c = document.getElementById('formulario-partidos');
+            const activas = window.jornadaConfig.filter(p => p.local.trim() !== "");
+            const lastName = localStorage.getItem('coliseo_user_last_name');
+            if (lastName) document.getElementById('user-name').value = lastName;
+
+            c.innerHTML = activas.map((p) => {
+                const realIdx = window.jornadaConfig.indexOf(p);
+                const locked = window.isMatchLocked(p.fecha);
+
+                return `
+                <div class="bg-slate-50 p-5 rounded-2xl border border-slate-100 space-y-3 ${locked ? 'opacity-70' : ''}">
+                    <div class="flex justify-between items-center">
+                        <span class="text-[9px] font-black ${locked ? 'text-red-500' : 'text-slate-900'} uppercase tracking-widest">FECHA LÍMITE: ${p.fecha || '--/--'}</span>
+                        <span class="text-[9px] font-black text-emerald-500 uppercase">PARTIDO ${realIdx+1}</span>
+                    </div>
+                    <div class="flex items-center justify-between">
+                        <span class="text-xs font-black uppercase text-slate-900">${p.local} vs ${p.visita}</span>
+                        <div class="flex gap-2">
+                            ${locked 
+                                ? `<div class="text-[10px] font-black bg-red-100 text-red-600 px-4 py-2.5 rounded-xl uppercase shadow-inner tracking-widest">CERRADO</div>`
+                                : ['1', 'X', '2'].map(opt => `<button onclick="window.setTempPred(${realIdx}, '${opt}')" id="btn-p${realIdx}-${opt}" class="w-10 h-10 rounded-xl border-2 border-slate-200 font-black text-xs text-slate-400 transition-all">${opt}</button>`).join('')
+                            }
+                        </div>
+                    </div>
+                </div>`;
+            }).join('');
+            window.tempPred = ['', '', '', '', ''];
+        };
+
+        window.setTempPred = (idx, val) => {
+            window.tempPred[idx] = val;
+            ['1', 'X', '2'].forEach(opt => {
+                const b = document.getElementById(`btn-p${idx}-${opt}`);
+                if(b) b.className = (opt === val) ? "w-10 h-10 rounded-xl border-2 border-emerald-500 bg-emerald-50 font-black text-xs text-emerald-600 scale-105 shadow-md" : "w-10 h-10 rounded-xl border-2 border-slate-200 font-black text-xs text-slate-400";
+            });
+        };
+
+        window.updateChart = () => {
+            if(!window.chartInstance) {
+                const ctx = document.getElementById('rankingChart');
+                if(!ctx) return;
+                window.chartInstance = new Chart(ctx.getContext('2d'), { type: 'bar', data: { labels: [], datasets: [{ data: [], backgroundColor: '#10b981', borderRadius: 8 }] }, options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { y: { display: false }, x: { grid: { display: false }, ticks: { color: '#94a3b8', font: { size: 9, weight: 'bold' } } } } } });
+            }
+            const top = [...window.database].sort((a,b) => b.puntos - a.puntos).slice(0, 5);
+            window.chartInstance.data.labels = top.map(u => u.nombre);
+            window.chartInstance.data.datasets[0].data = top.map(u => u.puntos);
+            window.chartInstance.update();
+        };
+
+        window.renderSetup(); 
+    </script>
+</body>
+</html>
